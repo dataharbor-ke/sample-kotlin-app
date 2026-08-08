@@ -1,46 +1,66 @@
-# Credence Sample Kotlin App
+# FDIS Kotlin sample
 
-A simple Android app demonstrating integration of the **CredenceSDK**.
-It shows how to request permissions, handle consent, and initialize the SDK.
+Native Android implementation for FDIS SDK `2.0.1`.
 
----
+## Setup
 
-## Usage
+Set the organisation key in `gradle.properties`.
 
-1. Open the project in **Android Studio**.
-2. Add your organization key to `gradle.properties`:
+```properties
+FDIS_ORG_KEY=your_org_key_here
+```
 
-   ```properties
-   CREDENCE_ORG_KEY=your_org_key_here
-   ```
-3. Run the app on a **physical device** (preferred) or emulator.
-4. Grant the **READ_SMS** permission when prompted.
-5. Accept the consent dialog to initialize the SDK.
+Build the app with Gradle.
 
-The SDK will register the client and upload SMS data.
+```bash
+./gradlew :app:assembleDebug
+```
 
----
+## Android configuration
 
-## Testing with an Emulator
+- `compileSdk`: `37`
+- `targetSdk`: `37`
+- `minSdk`: `24`
+- `libs/fdis-sdk-2.0.1.aar`
+- `com.google.code.gson:gson:2.13.2`
+- `com.squareup.okhttp3:okhttp:5.3.2`
+- `androidx.work:work-runtime-ktx:2.11.2`
 
-Since emulators don’t receive real SMS messages, you can **inject mock SMS** for testing:
+## Integration flow
 
-1. Open **Device Manager** → select your running emulator.
+`MainActivity` calls `FDIS.init(...)` with `syncEnabled = true` and `autoUpload = true`. The SDK shows the selected consent dialog during initialization.
 
-2. Click **“...”** → choose **“Phone”** → **“SMS”** tab.
+When consent is granted, `onConsentGranted` runs in the host app. The app then requests `READ_SMS` and `RECEIVE_SMS`. After both permissions are granted, the app calls `FDIS.onSmsPermissionGranted(...)`.
 
-3. Send a mock transaction message, for example:
+Permission retry and settings fallback are handled in the app UI. `FDIS.clearData(...)` is used to clear local SDK state.
 
-   ```
-   MPESA confirmed. Ksh 2,000 sent to John Doe 254712345678 on 18/10/2025.
-   ```
+## Custom consent fields
 
-4. The SDK will process the message automatically and upload it once network connectivity is available.
+The custom consent dialog accepts the following options.
 
----
+| Field | Type |
+| --- | --- |
+| `backgroundColorHex` | `String` |
+| `titleColorHex` | `String` |
+| `messageColorHex` | `String` |
+| `buttonColorHex` | `String` |
+| `buttonCornerRadius` | `Float` |
+| `iconColorHex` | `String` |
+| `closeIconColorHex` | `String` |
+| `titleText` | `String` |
+| `introText` | `String` |
+| `smsTitleText` | `String` |
+| `smsDescText` | `String` |
+| `privacyTitleText` | `String` |
+| `privacyDescText` | `String` |
+| `consentHtmlText` | `String` |
+| `buttonText` | `String` |
 
-## Notes
+## Backup exclusions
 
-* `READ_SMS` is requested at runtime (not in the manifest).
-* Only `INTERNET` permission should be declared in `AndroidManifest.xml`.
-* Use a physical device for the most accurate behavior.
+Android backup and device transfer exclude these SDK preference files:
+
+- `client_prefs.xml`
+- `fdis_sdk_prefs.xml`
+- `uploader_prefs.xml`
+- `sms_prefs.xml`

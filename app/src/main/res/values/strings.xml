@@ -1,8 +1,11 @@
 <resources>
-    <string name="app_name">sample_kotlin_app</string>
-    <string name="fdis_subtitle">Test and preview SDK initialization, consent dialogs, and data sync.</string>
+    <string name="app_name">FDIS Kotlin Sample</string>
+    <string name="fdis_subtitle">Test consent-first initialization, host-managed SMS permission, and data sync.</string>
     <string name="default_dialog">Start with Default Dialog</string>
     <string name="start_with_custom_dialog">Start with Custom Dialog</string>
-    <string name="tv_footer">© 2025 DataHarbor.co.ke — FDIS SDK</string>
+    <string name="tv_footer">(c) 2026 DataHarbor.co.ke - FDIS SDK</string>
     <string name="tv_title">Data Harbor FDIS SDK Demo App</string>
+    <string name="clear_sdk_data">Clear SDK Data</string>
+    <string name="sms_permission_banner_text">SMS access is required to begin FDIS data collection.</string>
+    <string name="sms_permission_banner_action">Enable SMS access</string>
 </resources>

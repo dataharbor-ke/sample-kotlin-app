@@ -1,69 +1,73 @@
 package co.ke.dataharbor.samplekotlinapplication
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.widget.Button
+import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.vibelinc.credencesdk.CredenceSDK
-import com.vibelinc.credencesdk.consent.ConsentDialog
+import co.ke.dataharbor.fdis_sdk.FDIS
+import co.ke.dataharbor.fdis_sdk.consent.ConsentDialog
 import java.util.UUID
 
 /**
- * Test app demonstrating how to integrate and test the Credence SDK.
+ * Sample app demonstrating the FDIS SDK host-app flow.
  *
- * Core developer workflow:
- * 1. Request the READ_SMS permission at runtime (required for transaction analysis).
- * 2. Initialize the SDK using `CredenceSDK.init()`.
- * 3. Start the SDK using `CredenceSDK.start()` once initialization succeeds.
- *
- * The SDK handles all backend communication, consent storage, and background syncing.
- * The developer only needs to manage permission checks and initialization calls.
+ * 1. Initialize FDIS to present consent and register the client.
+ * 2. Request Android SMS permissions from the consent callback.
+ * 3. Notify FDIS after both permissions are granted.
+ * 4. Keep permission retry UI in the host app.
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_SMS = 1001
-        private const val TAG = "CredenceTestApp"
+        private const val TAG = "FDISKotlinSample"
+        private const val HOST_PREFS_NAME = "fdis_sample_prefs"
+        private const val KEY_SMS_PERMISSION_REQUESTED = "sms_permission_requested"
     }
 
-    // User info (sample data for testing)
     private lateinit var name: String
     private lateinit var email: String
     private lateinit var phone: String
     private lateinit var externalId: String
+    private var awaitingPermissionSettings = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        // Step 1: Generate mock user data for testing
         generateTestUser()
 
-        // Step 2: Request SMS permission as soon as the app starts
-        // Developers should do this before initializing the SDK.
-        checkAndRequestSmsPermission()
-
-        // Step 3: Attach button listeners for SDK test options
         findViewById<Button>(R.id.btn_default_dialog).setOnClickListener {
-            // Use the SDK’s built-in consent dialog
-            if (hasSmsPermission()) startSdkWithDefaultDialog() else checkAndRequestSmsPermission()
+            startSdkWithDefaultDialog()
+        }
+        findViewById<Button>(R.id.btn_custom_dialog).setOnClickListener {
+            startSdkWithCustomDialog()
+        }
+        findViewById<Button>(R.id.btn_sms_permission_banner).setOnClickListener {
+            checkAndRequestSmsPermission()
+        }
+        findViewById<Button>(R.id.btn_clear_data).setOnClickListener {
+            FDIS.clearData(applicationContext)
+            updatePermissionBanner()
         }
 
-        findViewById<Button>(R.id.btn_custom_dialog).setOnClickListener {
-            // Use a custom consent dialog (app-defined UI)
-            if (hasSmsPermission()) startSdkWithCustomDialog() else checkAndRequestSmsPermission()
-        }
+        updatePermissionBanner()
     }
 
     /**
-     * Generates a temporary test user for demo purposes.
-     * In production, this data should come from your authenticated user.
+     * Uses temporary data for the sample. Supply the authenticated user's data
+     * in a production integration.
      */
     private fun generateTestUser() {
         val id = UUID.randomUUID().toString().take(6)
@@ -71,117 +75,165 @@ class MainActivity : AppCompatActivity() {
         email = "user_$id@test.dev"
         phone = "07${(10000000..99999999).random()}"
         externalId = "EXT_$id"
-        Log.i(TAG, "Generated test user → $name, $email, $phone, $externalId")
     }
 
-    /**
-     * Utility method to check if the READ_SMS permission is already granted.
-     */
-    private fun hasSmsPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            this, Manifest.permission.READ_SMS
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    /**
-     * Requests the READ_SMS permission from the user.
-     * This permission is mandatory for the SDK to read and analyze transaction SMS messages.
-     */
-    private fun checkAndRequestSmsPermission() {
-        if (!hasSmsPermission()) {
-            Log.i(TAG, "Requesting READ_SMS permission from user.")
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.READ_SMS),
-                REQ_SMS
-            )
+    override fun onResume() {
+        super.onResume()
+        if (awaitingPermissionSettings && hasSmsPermission()) {
+            awaitingPermissionSettings = false
+            notifySdkPermissionGranted()
         } else {
-            Log.i(TAG, "READ_SMS permission already granted.")
+            updatePermissionBanner()
         }
     }
 
+    private fun hasSmsPermission(): Boolean {
+        val readGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.READ_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        val receiveGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        return readGranted && receiveGranted
+    }
+
     /**
-     * Receives the user’s response to the permission request.
-     * If granted, the SDK can now be initialized.
+     * The host app requests Android permissions only after FDIS has consent.
      */
+    private fun checkAndRequestSmsPermission() {
+        if (!FDIS.hasConsent(this)) return
+        if (hasSmsPermission()) {
+            notifySdkPermissionGranted()
+            return
+        }
+
+        val permissionRequested = getSharedPreferences(HOST_PREFS_NAME, MODE_PRIVATE)
+            .getBoolean(KEY_SMS_PERMISSION_REQUESTED, false)
+        val canRequestAgain = listOf(
+            Manifest.permission.READ_SMS,
+            Manifest.permission.RECEIVE_SMS
+        ).any { permission ->
+            ContextCompat.checkSelfPermission(this, permission) !=
+                PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.shouldShowRequestPermissionRationale(this, permission)
+        }
+
+        if (permissionRequested && !canRequestAgain) {
+            awaitingPermissionSettings = true
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+            return
+        }
+
+        getSharedPreferences(HOST_PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SMS_PERMISSION_REQUESTED, true)
+            .apply()
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS),
+            REQ_SMS
+        )
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, results: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
-        if (requestCode == REQ_SMS && results.isNotEmpty() &&
-            results[0] == PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.i(TAG, "READ_SMS permission granted by user.")
+        if (requestCode != REQ_SMS) return
+
+        if (results.isNotEmpty() && results.all { it == PackageManager.PERMISSION_GRANTED }) {
+            notifySdkPermissionGranted()
         } else {
-            Log.e(TAG, "READ_SMS permission denied. SDK cannot function without it.")
+            updatePermissionBanner()
         }
     }
 
-    // --------------------------------------------------------------------------
-    // SDK Initialization Options
-    // --------------------------------------------------------------------------
+    private fun onConsentGranted() {
+        updatePermissionBanner()
+        if (!hasSmsPermission()) {
+            checkAndRequestSmsPermission()
+        } else {
+            notifySdkPermissionGranted()
+        }
+    }
 
-    /**
-     * Example 1: Initialize the SDK using the default built-in consent dialog.
-     *
-     * The SDK will automatically handle:
-     * - Displaying the consent screen
-     * - Registering the user with the backend
-     * - Uploading and syncing SMS messages
-     */
-    private fun startSdkWithDefaultDialog() {
-        Log.i(TAG, "Initializing CredenceSDK with default dialog.")
-
-        CredenceSDK.init(
-            context = this,
-            orgKey = BuildConfig.CREDENCE_ORG_KEY,  // Provided by DataHarbor
-            name = name,
-            email = email,
-            phone = phone,
-            externalId = externalId,
-            consentDialog = null // null means use SDK's default dialog
-        ) { success, error ->
-            if (success) {
-                Log.i(TAG, "CredenceSDK initialized successfully (default dialog).")
-                CredenceSDK.start(this)
-            } else {
-                Log.e(TAG, "CredenceSDK initialization failed: $error")
+    private fun notifySdkPermissionGranted() {
+        FDIS.onSmsPermissionGranted(applicationContext) { success, error ->
+            runOnUiThread {
+                updatePermissionBanner()
+                if (!success) {
+                    Log.e(TAG, "FDIS could not resume after permission grant: $error")
+                }
             }
         }
     }
 
-    /**
-     * Example 2: Initialize the SDK with a custom consent dialog.
-     *
-     * The app defines the consent UI (branding, colors, copy),
-     * while the SDK handles backend logic and storage once the user accepts.
-     */
-    private fun startSdkWithCustomDialog() {
-        Log.i(TAG, "Initializing CredenceSDK with custom consent dialog.")
+    private fun updatePermissionBanner() {
+        val show = FDIS.hasConsent(this) && !hasSmsPermission()
+        findViewById<TextView>(R.id.tv_sms_permission_banner).visibility =
+            if (show) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.btn_sms_permission_banner).visibility =
+            if (show) View.VISIBLE else View.GONE
+    }
 
-        val customDialog = ConsentDialog(
+    private fun startSdkWithDefaultDialog() {
+        FDIS.init(
             context = this,
-            titleText = "Custom Consent",
-            introText = "We’ll analyze your SMS messages for financial insights.",
-            smsTitleText = "SMS Access",
-            smsDescText = "We only scan messages to detect and process transactions.",
-            buttonText = "Agree"
-        )
-
-        CredenceSDK.init(
-            context = this,
-            orgKey = BuildConfig.CREDENCE_ORG_KEY,
+            orgKey = BuildConfig.FDIS_ORG_KEY,
             name = name,
             email = email,
             phone = phone,
             externalId = externalId,
-            consentDialog = customDialog
+            syncEnabled = true,
+            autoUpload = true,
+            consentDialog = null,
+            onConsentGranted = ::onConsentGranted
         ) { success, error ->
-            if (success) {
-                Log.i(TAG, "CredenceSDK initialized successfully (custom dialog).")
-                CredenceSDK.start(this)
-            } else {
-                Log.e(TAG, "CredenceSDK initialization failed: $error")
+            if (!success) {
+                Log.e(TAG, "FDIS SDK initialization failed: $error")
+            }
+        }
+    }
+
+    private fun startSdkWithCustomDialog() {
+        val customDialog = ConsentDialog(
+            context = this,
+            backgroundColorHex = "#FFFFFF",
+            titleColorHex = "#111827",
+            messageColorHex = "#374151",
+            buttonColorHex = "#1976D2",
+            buttonCornerRadius = 24f,
+            iconColorHex = "#1976D2",
+            closeIconColorHex = "#6B7280",
+            titleText = "Empower Your Insights",
+            introText = "We'll securely analyze SMS messages to uncover financial patterns.",
+            smsTitleText = "SMS Access",
+            smsDescText = "We only scan messages needed to detect and process transactions.",
+            privacyTitleText = "Privacy First",
+            privacyDescText = "Your data is encrypted and used only for FDIS financial insights.",
+            consentHtmlText = "I agree to the <b>FDIS Terms</b> and <b>Privacy Policy</b>.",
+            buttonText = "Allow FDIS"
+        )
+
+        FDIS.init(
+            context = this,
+            orgKey = BuildConfig.FDIS_ORG_KEY,
+            name = name,
+            email = email,
+            phone = phone,
+            externalId = externalId,
+            syncEnabled = true,
+            autoUpload = true,
+            consentDialog = customDialog,
+            onConsentGranted = ::onConsentGranted
+        ) { success, error ->
+            if (!success) {
+                Log.e(TAG, "FDIS SDK initialization failed: $error")
             }
         }
     }

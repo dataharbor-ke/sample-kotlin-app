@@ -5,20 +5,20 @@ plugins {
 
 android {
     namespace = "co.ke.dataharbor.samplekotlinapplication"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "co.ke.dataharbor.samplekotlinapplication"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField(
             "String",
-            "CREDENCE_ORG_KEY",
-            "\"${project.properties["CREDENCE_ORG_KEY"]}\""
+            "FDIS_ORG_KEY",
+            "\"${project.properties["FDIS_ORG_KEY"] ?: "your_key_here"}\""
         )
     }
 
@@ -53,8 +53,8 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
 
-    // Credence SDK + dependencies
-    implementation(libs.credence)
+    // FDIS SDK + dependencies
+    implementation(files("libs/fdis-sdk-2.0.1.aar"))
     implementation(libs.gson)
     implementation(libs.okhttp3)
     implementation(libs.work)

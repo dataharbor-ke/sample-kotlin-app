@@ -6,8 +6,8 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="client_prefs.xml" />
+    <exclude domain="sharedpref" path="fdis_sdk_prefs.xml" />
+    <exclude domain="sharedpref" path="uploader_prefs.xml" />
+    <exclude domain="sharedpref" path="sms_prefs.xml" />
 </full-backup-content>
